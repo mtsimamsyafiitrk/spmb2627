@@ -445,7 +445,8 @@
   @media print {
     body { background: white !important; font-size: 12px; }
     .app-header, .bottom-nav, .no-print, .btn { display: none !important; }
-    .main-content { padding: 0; max-width: 100%; }
+    .main-content { display: none !important; }
+    #print-area { display: block !important; }
     .card { box-shadow: none !important; border: 1px solid #ccc; break-inside: avoid; border-radius: 0 !important; }
   }
   #print-area { display: none; font-family: 'Plus Jakarta Sans', sans-serif; color: #111; }
