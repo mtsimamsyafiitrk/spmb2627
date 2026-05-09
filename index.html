@@ -831,11 +831,6 @@ async function initLocalCache() {
 
 async function initAuth() {
   await initLocalCache();
-  if (_memCache.peserta.length > 0 || _memCache.siswa.length > 0) {
-    setAuthShell(true);
-    updateAuthHeader();
-    showPage('home');
-  }
   if (!supabaseClient) {
     renderLogin('⚠️ Supabase tidak dapat dimuat. Periksa koneksi internet dan refresh halaman.');
     return;
@@ -865,9 +860,7 @@ async function initAuth() {
     setAuthShell(true);
     updateAuthHeader();
     startSupabaseRealtime();
-    if (!(_memCache.peserta.length > 0 || _memCache.siswa.length > 0)) {
-      showPage('home');
-    }
+    showPage('home');
     const migrationDone = localStorage.getItem('spmb_migrated_to_supabase');
     if (!migrationDone) {
       await loadSupabaseData({ rerender: false });
