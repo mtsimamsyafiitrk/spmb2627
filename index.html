@@ -2750,6 +2750,7 @@ function renderRekap() {
   updateHeaderInfo();
   const siswa = DB.siswa;
   const ortu = DB.ortu;
+  const audit = buildDataAudit();
 
   const byTingkatan = {
     'MTs Putra': siswa.filter(s=>s.tingkatan==='MTs Putra'),
