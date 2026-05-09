@@ -814,7 +814,28 @@ async function logout() {
   renderLogin();
 }
 
+async function initLocalCache() {
+  try {
+    const [peserta, siswa, ortu] = await Promise.all([
+      idbGetAll('peserta'),
+      idbGetAll('siswa'),
+      idbGetAll('ortu'),
+    ]);
+    _memCache.peserta = peserta;
+    _memCache.siswa = siswa;
+    _memCache.ortu = ortu;
+  } catch (e) {
+    console.warn('initLocalCache error:', e);
+  }
+}
+
 async function initAuth() {
+  await initLocalCache();
+  if (_memCache.peserta.length > 0 || _memCache.siswa.length > 0) {
+    setAuthShell(true);
+    updateAuthHeader();
+    showPage('home');
+  }
   if (!supabaseClient) {
     renderLogin('⚠️ Supabase tidak dapat dimuat. Periksa koneksi internet dan refresh halaman.');
     return;
@@ -844,7 +865,9 @@ async function initAuth() {
     setAuthShell(true);
     updateAuthHeader();
     startSupabaseRealtime();
-    showPage('home');
+    if (!(_memCache.peserta.length > 0 || _memCache.siswa.length > 0)) {
+      showPage('home');
+    }
     const migrationDone = localStorage.getItem('spmb_migrated_to_supabase');
     if (!migrationDone) {
       await loadSupabaseData({ rerender: false });
@@ -888,51 +911,112 @@ function updateHeaderInfo() {
 // DATA LAYER
 // ═══════════════════════════════════════════════════
 
-// ── In-memory cache (diisi saat load dari Supabase atau localStorage) ──
-const _dbCache = {
-  siswa: null,
-  ortu: null,
-  peserta: null,
+// ── In-memory cache (diisi dari IndexedDB saat startup, lalu dari Supabase) ──
+const _memCache = {
+  siswa: [],
+  ortu: [],
+  peserta: [],
 };
+
+// ── IndexedDB layer ──────────────────────────────────────────────────────────
+let _idb = null;
+function openIDB() {
+  if (_idb) return Promise.resolve(_idb);
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open('spmb_db', 1);
+    req.onupgradeneeded = e => {
+      const db = e.target.result;
+      ['peserta', 'siswa', 'ortu'].forEach(name => {
+        if (!db.objectStoreNames.contains(name)) db.createObjectStore(name, { keyPath: 'id' });
+      });
+      if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+    };
+    req.onsuccess = e => { _idb = e.target.result; resolve(_idb); };
+    req.onerror = e => reject(e.target.error);
+  });
+}
+
+async function idbGetAll(storeName) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readonly');
+      const req = tx.objectStore(storeName).getAll();
+      req.onsuccess = () => resolve(req.result || []);
+      req.onerror = e => reject(e.target.error);
+    });
+  } catch (e) { console.warn('idbGetAll error:', e); return []; }
+}
+
+async function idbPutAll(storeName, items) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      const store = tx.objectStore(storeName);
+      items.forEach(item => store.put(item));
+      tx.oncomplete = () => resolve();
+      tx.onerror = e => reject(e.target.error);
+    });
+  } catch (e) { console.warn('idbPutAll error:', e); }
+}
+
+async function idbClear(storeName) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(storeName, 'readwrite');
+      tx.objectStore(storeName).clear();
+      tx.oncomplete = () => resolve();
+      tx.onerror = e => reject(e.target.error);
+    });
+  } catch (e) { console.warn('idbClear error:', e); }
+}
+
+async function getLastSync(key) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('meta', 'readonly');
+      const req = tx.objectStore('meta').get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = e => reject(e.target.error);
+    });
+  } catch (e) { console.warn('getLastSync error:', e); return null; }
+}
+
+async function setLastSync(key, value) {
+  try {
+    const db = await openIDB();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction('meta', 'readwrite');
+      tx.objectStore('meta').put(value, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = e => reject(e.target.error);
+    });
+  } catch (e) { console.warn('setLastSync error:', e); }
+}
 
 const DB = {
   // ── siswa ──────────────────────────────────────────────────────────
-  get siswa() {
-    if (_dbCache.siswa !== null) return _dbCache.siswa;
-    _dbCache.siswa = JSON.parse(localStorage.getItem('spmb_siswa') || '[]');
-    return _dbCache.siswa;
-  },
+  get siswa() { return _memCache.siswa; },
   set siswa(v) {
-    _dbCache.siswa = v;
-    if (!usingSupabase()) {
-      try { localStorage.setItem('spmb_siswa', JSON.stringify(v)); } catch(e) { console.warn('localStorage siswa full, skip save:', e.message); }
-    }
+    _memCache.siswa = v;
+    idbPutAll('siswa', v);
   },
 
   // ── ortu ──────────────────────────────────────────────────────────
-  get ortu() {
-    if (_dbCache.ortu !== null) return _dbCache.ortu;
-    _dbCache.ortu = JSON.parse(localStorage.getItem('spmb_ortu') || '[]');
-    return _dbCache.ortu;
-  },
+  get ortu() { return _memCache.ortu; },
   set ortu(v) {
-    _dbCache.ortu = v;
-    if (!usingSupabase()) {
-      try { localStorage.setItem('spmb_ortu', JSON.stringify(v)); } catch(e) { console.warn('localStorage ortu full, skip save:', e.message); }
-    }
+    _memCache.ortu = v;
+    idbPutAll('ortu', v);
   },
 
   // ── peserta ───────────────────────────────────────────────────────
-  get peserta() {
-    if (_dbCache.peserta !== null) return _dbCache.peserta;
-    _dbCache.peserta = JSON.parse(localStorage.getItem('spmb_peserta') || '[]');
-    return _dbCache.peserta;
-  },
+  get peserta() { return _memCache.peserta; },
   set peserta(v) {
-    _dbCache.peserta = v;
-    if (!usingSupabase()) {
-      try { localStorage.setItem('spmb_peserta', JSON.stringify(v)); } catch(e) { console.warn('localStorage peserta full, skip save:', e.message); }
-    }
+    _memCache.peserta = v;
+    idbPutAll('peserta', v);
   },
 
   // ── Logo lembaga (base64) — tetap di localStorage, ukurannya kecil ──
@@ -1149,41 +1233,85 @@ function ortuToRemoteRow(o) {
 
 let _realtimeDebounceTimer = null;
 
-async function loadSupabaseData({ rerender = true } = {}) {
+async function loadSupabaseData({ rerender = true, force = false } = {}) {
   if (!usingSupabase() || isLoadingRemote) return;
   isLoadingRemote = true;
   try {
-    // Query peserta & wawancara secara terpisah (tanpa join berat di Supabase)
-    // Nama peserta diambil dari tabel peserta lalu di-map di sisi client
-    const [pesertaRes, siswaRes, ortuRes] = await Promise.all([
-      supabaseClient.from('peserta').select('id,nama,tingkatan,created_at,updated_at').order('tingkatan').order('nama'),
-      supabaseClient.from('wawancara_santri').select('*').order('updated_at', { ascending: false }),
-      supabaseClient.from('wawancara_ortu').select('*').order('updated_at', { ascending: false })
-    ]);
+    const lastSync = await getLastSync('last_full_sync');
+    const isIncremental = !force && lastSync !== null;
+
+    let pesertaQ = supabaseClient.from('peserta').select('id,nama,tingkatan,created_at,updated_at').order('tingkatan').order('nama');
+    let siswaQ   = supabaseClient.from('wawancara_santri').select('*').order('updated_at', { ascending: false });
+    let ortuQ    = supabaseClient.from('wawancara_ortu').select('*').order('updated_at', { ascending: false });
+
+    if (isIncremental) {
+      pesertaQ = pesertaQ.gt('updated_at', lastSync);
+      siswaQ   = siswaQ.gt('updated_at', lastSync);
+      ortuQ    = ortuQ.gt('updated_at', lastSync);
+    }
+
+    const [pesertaRes, siswaRes, ortuRes] = await Promise.all([pesertaQ, siswaQ, ortuQ]);
     if (pesertaRes.error) throw pesertaRes.error;
-    if (siswaRes.error) throw siswaRes.error;
-    if (ortuRes.error) throw ortuRes.error;
+    if (siswaRes.error)   throw siswaRes.error;
+    if (ortuRes.error)    throw ortuRes.error;
 
-    // Build peserta lookup map: id → {nama, tingkatan}
-    const pesertaList = (pesertaRes.data || []).map(mapPesertaFromRemote);
-    const pesertaMap = {};
-    pesertaList.forEach(p => { pesertaMap[p.id] = p; });
+    const now = new Date().toISOString();
 
-    // Map siswa dengan inject nama/tingkatan dari pesertaMap (bukan join SQL)
-    const siswa = (siswaRes.data || []).map(row => {
-      const p = pesertaMap[row.peserta_id] || {};
-      return mapSiswaFromRemote({ ...row, peserta: { id: p.id, nama: p.nama, tingkatan: p.tingkatan } });
-    });
+    if (!isIncremental) {
+      // Full load — replace cache entirely
+      const pesertaList = (pesertaRes.data || []).map(mapPesertaFromRemote);
+      const pesertaMap = {};
+      pesertaList.forEach(p => { pesertaMap[p.id] = p; });
+      const siswa = (siswaRes.data || []).map(row => {
+        const p = pesertaMap[row.peserta_id] || {};
+        return mapSiswaFromRemote({ ...row, peserta: { id: p.id, nama: p.nama, tingkatan: p.tingkatan } });
+      });
+      const ortu = (ortuRes.data || []).map(row => {
+        const p = pesertaMap[row.peserta_id] || {};
+        return mapOrtuFromRemote({ ...row, peserta: { id: p.id, nama: p.nama, tingkatan: p.tingkatan } }, siswa);
+      });
+      _memCache.peserta = pesertaList;
+      _memCache.siswa   = siswa;
+      _memCache.ortu    = ortu;
+    } else {
+      // Incremental — build pesertaMap from full current cache + new rows
+      const newPeserta = (pesertaRes.data || []).map(mapPesertaFromRemote);
+      const pesertaMap = {};
+      _memCache.peserta.forEach(p => { pesertaMap[p.id] = p; });
+      newPeserta.forEach(p => { pesertaMap[p.id] = p; });
 
-    // Map ortu dengan inject nama dari pesertaMap
-    const ortu = (ortuRes.data || []).map(row => {
-      const p = pesertaMap[row.peserta_id] || {};
-      return mapOrtuFromRemote({ ...row, peserta: { id: p.id, nama: p.nama, tingkatan: p.tingkatan } }, siswa);
-    });
+      // Merge peserta
+      newPeserta.forEach(p => {
+        const idx = _memCache.peserta.findIndex(x => x.id === p.id);
+        if (idx >= 0) _memCache.peserta[idx] = p; else _memCache.peserta.push(p);
+      });
 
-    DB.peserta = pesertaList;
-    DB.siswa = siswa;
-    DB.ortu = ortu;
+      // Merge siswa
+      const newSiswa = (siswaRes.data || []).map(row => {
+        const p = pesertaMap[row.peserta_id] || {};
+        return mapSiswaFromRemote({ ...row, peserta: { id: p.id, nama: p.nama, tingkatan: p.tingkatan } });
+      });
+      newSiswa.forEach(s => {
+        const idx = _memCache.siswa.findIndex(x => x.id === s.id);
+        if (idx >= 0) _memCache.siswa[idx] = s; else _memCache.siswa.push(s);
+      });
+
+      // Merge ortu
+      const newOrtu = (ortuRes.data || []).map(row => {
+        const p = pesertaMap[row.peserta_id] || {};
+        return mapOrtuFromRemote({ ...row, peserta: { id: p.id, nama: p.nama, tingkatan: p.tingkatan } }, _memCache.siswa);
+      });
+      newOrtu.forEach(o => {
+        const idx = _memCache.ortu.findIndex(x => x.id === o.id);
+        if (idx >= 0) _memCache.ortu[idx] = o; else _memCache.ortu.push(o);
+      });
+    }
+
+    // Persist to IndexedDB (non-blocking)
+    idbPutAll('peserta', _memCache.peserta);
+    idbPutAll('siswa', _memCache.siswa);
+    idbPutAll('ortu', _memCache.ortu);
+    setLastSync('last_full_sync', now);
 
     if (rerender && currentUser && !['siswa-form', 'ortu-form'].includes(currentPage)) {
       showPage(currentPage || 'home');
@@ -1229,9 +1357,9 @@ async function reloadOrtuOnly() {
 }
 
 function _debouncedRealtimeLoad() {
-  // Batasi reload realtime max 1x per 3 detik agar tidak spam query ke Supabase
+  // Batasi reload realtime max 1x per 10 detik agar tidak spam query ke Supabase
   clearTimeout(_realtimeDebounceTimer);
-  _realtimeDebounceTimer = setTimeout(() => loadSupabaseData(), 3000);
+  _realtimeDebounceTimer = setTimeout(() => loadSupabaseData(), 10000);
 }
 
 function startSupabaseRealtime() {
@@ -2181,6 +2309,24 @@ function getRadioVal(name) {
   return el ? el.value : '';
 }
 
+async function uploadFotoToStorage(base64DataUrl, prefix) {
+  if (!base64DataUrl || !base64DataUrl.startsWith('data:')) return base64DataUrl;
+  const [meta, b64] = base64DataUrl.split(',');
+  const mime = meta.match(/:(.*?);/)[1];
+  const ext = mime.split('/')[1] || 'jpg';
+  const byteStr = atob(b64);
+  const arr = new Uint8Array(byteStr.length);
+  for (let i = 0; i < byteStr.length; i++) arr[i] = byteStr.charCodeAt(i);
+  const blob = new Blob([arr], { type: mime });
+  const timestamp = Date.now();
+  const rand = Math.random().toString(36).substr(2, 6);
+  const path = `${prefix}/${timestamp}_${rand}.${ext}`;
+  const { error } = await supabaseClient.storage.from('spmb-foto').upload(path, blob, { upsert: true });
+  if (error) throw error;
+  const { data } = supabaseClient.storage.from('spmb-foto').getPublicUrl(path);
+  return data.publicUrl;
+}
+
 async function saveSiswa() {
   // Ambil peserta dari dropdown
   const sel = document.getElementById('pesertaSelect');
@@ -2231,7 +2377,9 @@ async function saveSiswa() {
     pengarahLain: document.getElementById('pengarahLain').value,
     kesiapan,
     catatanWawancara: document.getElementById('catatanWawancara').value,
-    foto: foto && foto.startsWith('data:') ? foto : '',
+    foto: foto && foto.startsWith('data:')
+      ? await uploadFotoToStorage(foto, 'siswa')
+      : (foto || ''),
     halaqah: halaqahRaw === 'Belum Ditentukan' ? '' : halaqahRaw,
     keputusan: getRadioVal('keputusan'),
     namaPetugas: document.getElementById('namaPetugas').value,
@@ -2746,7 +2894,9 @@ async function saveOrtu() {
     pembayaranPangkal,
     spp,
     catatanPembiayaan: document.getElementById('catatanPembiayaan').value,
-    foto: foto && foto.startsWith('data:') ? foto : '',
+    foto: foto && foto.startsWith('data:')
+      ? await uploadFotoToStorage(foto, 'ortu')
+      : (foto || ''),
     namaPetugas: document.getElementById('namaPetugasOrtu').value,
     tanggalWawancara: document.getElementById('tanggalWawancaraOrtu').value,
     statusPersetujuan: getRadioVal('statusPersetujuan'),
