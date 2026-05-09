@@ -793,13 +793,17 @@ async function login() {
   currentRole = getRoleFromEmail(currentUser.email);
   setAuthShell(true);
   updateAuthHeader();
-  await loadSupabaseData({ rerender: false });
   startSupabaseRealtime();
-  // Migrasi data lokal ke Supabase jika ada (hanya sekali)
-  await migrasiDataLokalKeSupabase();
-  await loadSupabaseData({ rerender: false }); // reload setelah migrasi
   showToast(`Login sebagai ${isAdmin() ? 'admin' : 'petugas'}`);
-  showPage('home');
+  showPage('home'); // tampilkan cache segera, lalu refresh di background
+  const migrationDone = localStorage.getItem('spmb_migrated_to_supabase');
+  if (!migrationDone) {
+    await loadSupabaseData({ rerender: false });
+    await migrasiDataLokalKeSupabase();
+    await loadSupabaseData(); // rerender setelah migrasi
+  } else {
+    loadSupabaseData(); // refresh background, rerender otomatis saat selesai
+  }
 }
 
 async function logout() {
@@ -839,12 +843,16 @@ async function initAuth() {
   if (currentUser) {
     setAuthShell(true);
     updateAuthHeader();
-    await loadSupabaseData({ rerender: false });
     startSupabaseRealtime();
-    // Migrasi data lokal ke Supabase jika ada (hanya sekali)
-    await migrasiDataLokalKeSupabase();
-    await loadSupabaseData({ rerender: false }); // reload setelah migrasi
-    showPage('home');
+    showPage('home'); // tampilkan cache segera, lalu refresh di background
+    const migrationDone = localStorage.getItem('spmb_migrated_to_supabase');
+    if (!migrationDone) {
+      await loadSupabaseData({ rerender: false });
+      await migrasiDataLokalKeSupabase();
+      await loadSupabaseData(); // rerender setelah migrasi
+    } else {
+      loadSupabaseData(); // refresh background, rerender otomatis saat selesai
+    }
   } else {
     renderLogin();
   }
@@ -896,10 +904,7 @@ const DB = {
   },
   set siswa(v) {
     _dbCache.siswa = v;
-    // Hanya simpan ke localStorage saat mode lokal (tidak pakai Supabase)
-    if (!usingSupabase()) {
-      try { localStorage.setItem('spmb_siswa', JSON.stringify(v)); } catch(e) { console.warn('localStorage siswa full, skip save:', e.message); }
-    }
+    try { localStorage.setItem('spmb_siswa', JSON.stringify(v)); } catch(e) { console.warn('localStorage siswa full, skip save:', e.message); }
   },
 
   // ── ortu ──────────────────────────────────────────────────────────
@@ -910,9 +915,7 @@ const DB = {
   },
   set ortu(v) {
     _dbCache.ortu = v;
-    if (!usingSupabase()) {
-      try { localStorage.setItem('spmb_ortu', JSON.stringify(v)); } catch(e) { console.warn('localStorage ortu full, skip save:', e.message); }
-    }
+    try { localStorage.setItem('spmb_ortu', JSON.stringify(v)); } catch(e) { console.warn('localStorage ortu full, skip save:', e.message); }
   },
 
   // ── peserta ───────────────────────────────────────────────────────
@@ -923,9 +926,7 @@ const DB = {
   },
   set peserta(v) {
     _dbCache.peserta = v;
-    if (!usingSupabase()) {
-      try { localStorage.setItem('spmb_peserta', JSON.stringify(v)); } catch(e) { console.warn('localStorage peserta full, skip save:', e.message); }
-    }
+    try { localStorage.setItem('spmb_peserta', JSON.stringify(v)); } catch(e) { console.warn('localStorage peserta full, skip save:', e.message); }
   },
 
   // ── Logo lembaga (base64) — tetap di localStorage, ukurannya kecil ──
@@ -1196,6 +1197,31 @@ async function loadSupabaseData({ rerender = true } = {}) {
   }
 }
 
+async function reloadSiswaOnly() {
+  if (!usingSupabase()) return;
+  const pesertaMap = {};
+  DB.peserta.forEach(p => { pesertaMap[p.id] = p; });
+  const { data, error } = await supabaseClient.from('wawancara_santri').select('*').order('updated_at', { ascending: false });
+  if (error) throw error;
+  DB.siswa = (data || []).map(row => {
+    const p = pesertaMap[row.peserta_id] || {};
+    return mapSiswaFromRemote({ ...row, peserta: { id: p.id, nama: p.nama, tingkatan: p.tingkatan } });
+  });
+}
+
+async function reloadOrtuOnly() {
+  if (!usingSupabase()) return;
+  const siswa = DB.siswa;
+  const pesertaMap = {};
+  DB.peserta.forEach(p => { pesertaMap[p.id] = p; });
+  const { data, error } = await supabaseClient.from('wawancara_ortu').select('*').order('updated_at', { ascending: false });
+  if (error) throw error;
+  DB.ortu = (data || []).map(row => {
+    const p = pesertaMap[row.peserta_id] || {};
+    return mapOrtuFromRemote({ ...row, peserta: { id: p.id, nama: p.nama, tingkatan: p.tingkatan } }, siswa);
+  });
+}
+
 function _debouncedRealtimeLoad() {
   // Batasi reload realtime max 1x per 3 detik agar tidak spam query ke Supabase
   clearTimeout(_realtimeDebounceTimer);
@@ -1240,7 +1266,7 @@ async function saveSiswaRemote(siswa) {
     .from('wawancara_santri')
     .upsert(siswaToRemoteRow(siswa), { onConflict: 'peserta_id' });
   if (error) throw error;
-  await loadSupabaseData({ rerender: false });
+  await reloadSiswaOnly();
 }
 
 async function saveOrtuRemote(ortu) {
@@ -1249,7 +1275,7 @@ async function saveOrtuRemote(ortu) {
     .from('wawancara_ortu')
     .upsert(ortuToRemoteRow(ortu), { onConflict: 'peserta_id' });
   if (error) throw error;
-  await loadSupabaseData({ rerender: false });
+  await reloadOrtuOnly();
 }
 
 async function deleteSiswaRemote(id) {
