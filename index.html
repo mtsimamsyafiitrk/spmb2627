@@ -795,13 +795,15 @@ async function login() {
   updateAuthHeader();
   startSupabaseRealtime();
   showToast(`Login sebagai ${isAdmin() ? 'admin' : 'petugas'}`);
+  showPage('home');
   const migrationDone = localStorage.getItem('spmb_migrated_to_supabase');
   if (!migrationDone) {
     await loadSupabaseData({ rerender: false });
     await migrasiDataLokalKeSupabase();
+    await loadSupabaseData(); // rerender setelah migrasi
+  } else {
+    loadSupabaseData(); // sinkron background, rerender otomatis saat selesai
   }
-  await loadSupabaseData(); // muat data sebelum tampilkan halaman
-  showPage('home');
 }
 
 async function logout() {
@@ -842,13 +844,15 @@ async function initAuth() {
     setAuthShell(true);
     updateAuthHeader();
     startSupabaseRealtime();
+    showPage('home');
     const migrationDone = localStorage.getItem('spmb_migrated_to_supabase');
     if (!migrationDone) {
       await loadSupabaseData({ rerender: false });
       await migrasiDataLokalKeSupabase();
+      await loadSupabaseData(); // rerender setelah migrasi
+    } else {
+      loadSupabaseData(); // sinkron background, rerender otomatis saat selesai
     }
-    await loadSupabaseData(); // muat data sebelum tampilkan halaman
-    showPage('home');
   } else {
     renderLogin();
   }
@@ -900,7 +904,9 @@ const DB = {
   },
   set siswa(v) {
     _dbCache.siswa = v;
-    try { localStorage.setItem('spmb_siswa', JSON.stringify(v)); } catch(e) { console.warn('localStorage siswa full, skip save:', e.message); }
+    if (!usingSupabase()) {
+      try { localStorage.setItem('spmb_siswa', JSON.stringify(v)); } catch(e) { console.warn('localStorage siswa full, skip save:', e.message); }
+    }
   },
 
   // ── ortu ──────────────────────────────────────────────────────────
@@ -911,7 +917,9 @@ const DB = {
   },
   set ortu(v) {
     _dbCache.ortu = v;
-    try { localStorage.setItem('spmb_ortu', JSON.stringify(v)); } catch(e) { console.warn('localStorage ortu full, skip save:', e.message); }
+    if (!usingSupabase()) {
+      try { localStorage.setItem('spmb_ortu', JSON.stringify(v)); } catch(e) { console.warn('localStorage ortu full, skip save:', e.message); }
+    }
   },
 
   // ── peserta ───────────────────────────────────────────────────────
@@ -922,7 +930,9 @@ const DB = {
   },
   set peserta(v) {
     _dbCache.peserta = v;
-    try { localStorage.setItem('spmb_peserta', JSON.stringify(v)); } catch(e) { console.warn('localStorage peserta full, skip save:', e.message); }
+    if (!usingSupabase()) {
+      try { localStorage.setItem('spmb_peserta', JSON.stringify(v)); } catch(e) { console.warn('localStorage peserta full, skip save:', e.message); }
+    }
   },
 
   // ── Logo lembaga (base64) — tetap di localStorage, ukurannya kecil ──
