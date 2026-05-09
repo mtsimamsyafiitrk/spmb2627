@@ -795,15 +795,13 @@ async function login() {
   updateAuthHeader();
   startSupabaseRealtime();
   showToast(`Login sebagai ${isAdmin() ? 'admin' : 'petugas'}`);
-  showPage('home'); // tampilkan cache segera, lalu refresh di background
   const migrationDone = localStorage.getItem('spmb_migrated_to_supabase');
   if (!migrationDone) {
     await loadSupabaseData({ rerender: false });
     await migrasiDataLokalKeSupabase();
-    await loadSupabaseData(); // rerender setelah migrasi
-  } else {
-    loadSupabaseData(); // refresh background, rerender otomatis saat selesai
   }
+  await loadSupabaseData(); // muat data sebelum tampilkan halaman
+  showPage('home');
 }
 
 async function logout() {
@@ -844,15 +842,13 @@ async function initAuth() {
     setAuthShell(true);
     updateAuthHeader();
     startSupabaseRealtime();
-    showPage('home'); // tampilkan cache segera, lalu refresh di background
     const migrationDone = localStorage.getItem('spmb_migrated_to_supabase');
     if (!migrationDone) {
       await loadSupabaseData({ rerender: false });
       await migrasiDataLokalKeSupabase();
-      await loadSupabaseData(); // rerender setelah migrasi
-    } else {
-      loadSupabaseData(); // refresh background, rerender otomatis saat selesai
     }
+    await loadSupabaseData(); // muat data sebelum tampilkan halaman
+    showPage('home');
   } else {
     renderLogin();
   }
@@ -1266,7 +1262,6 @@ async function saveSiswaRemote(siswa) {
     .from('wawancara_santri')
     .upsert(siswaToRemoteRow(siswa), { onConflict: 'peserta_id' });
   if (error) throw error;
-  await reloadSiswaOnly();
 }
 
 async function saveOrtuRemote(ortu) {
@@ -1275,7 +1270,6 @@ async function saveOrtuRemote(ortu) {
     .from('wawancara_ortu')
     .upsert(ortuToRemoteRow(ortu), { onConflict: 'peserta_id' });
   if (error) throw error;
-  await reloadOrtuOnly();
 }
 
 async function deleteSiswaRemote(id) {
