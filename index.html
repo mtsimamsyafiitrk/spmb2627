@@ -742,6 +742,9 @@ async function initLocalCache() {
     _memCache.peserta = peserta;
     _memCache.siswa = siswa;
     _memCache.ortu = ortu;
+    let _localSppChanged = false;
+    _memCache.ortu.forEach(o => { if (o.spp === '700000') { o.spp = '800000'; _localSppChanged = true; } });
+    if (_localSppChanged) idbPutAll('ortu', _memCache.ortu);
   } catch (e) {
     console.warn('initLocalCache error:', e);
   }
@@ -1136,11 +1139,19 @@ function ortuToRemoteRow(o) {
 }
 
 let _realtimeDebounceTimer = null;
+let _sppMigrated = false;
 
 async function loadSupabaseData({ rerender = true, force = false } = {}) {
   if (!usingSupabase() || isLoadingRemote) return;
   isLoadingRemote = true;
   try {
+    if (!_sppMigrated) {
+      try {
+        await supabaseClient.from('wawancara_ortu').update({ spp: 800000 }).eq('spp', 700000);
+        _sppMigrated = true;
+      } catch(e) { console.warn('migrasi spp 700→800:', e); }
+    }
+
     const lastSync = await getLastSync('last_full_sync');
     const isIncremental = !force && lastSync !== null;
 
@@ -2463,7 +2474,7 @@ function renderOrtuForm() {
   });
 
   const sppOptions = [
-    { value: '700000', label: 'Rp 700.000/bulan' },
+    { value: '800000', label: 'Rp 800.000/bulan' },
     { value: '900000', label: 'Rp 900.000/bulan' },
     { value: '1000000', label: 'Rp 1.000.000/bulan' },
   ];
@@ -2991,7 +3002,7 @@ function renderRekap() {
         <table class="rekap-table">
           <thead><tr><th>Nominal SPP</th><th>Jumlah</th></tr></thead>
           <tbody>
-            ${[700000,900000,1000000].map(s => `
+            ${[800000,900000,1000000].map(s => `
               <tr><td>${formatRupiah(s)}/bulan</td><td><strong>${sppCount[String(s)]||0}</strong></td></tr>
             `).join('')}
           </tbody>
@@ -3415,7 +3426,7 @@ async function exportExcel() {
     ['Ditolak', siswa.filter(s=>s.keputusan==='Ditolak').length],
     [],
     ['PILIHAN SPP', ''],
-    ['Rp 700.000/bulan', ortu.filter(o=>o.spp==='700000').length],
+    ['Rp 800.000/bulan', ortu.filter(o=>o.spp==='800000').length],
     ['Rp 900.000/bulan', ortu.filter(o=>o.spp==='900000').length],
     ['Rp 1.000.000/bulan', ortu.filter(o=>o.spp==='1000000').length],
   ];
