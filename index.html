@@ -1804,18 +1804,10 @@ async function exportPesertaExcel() {
 // SISWA LIST
 // ═══════════════════════════════════════════════════
 
-let siswaFilter = 'Semua';
-let siswaSearch = '';
-
 function renderSiswaList() {
   updateHeaderInfo();
   const all = DB.siswa;
-  const ortu = DB.ortu;
   const peserta = DB.peserta;
-  const filters = ['Semua', 'MTs Putra', 'MTs Putri', 'MA'];
-  const q = normalizeText(siswaSearch);
-  const filtered = (siswaFilter === 'Semua' ? all : all.filter(s => s.tingkatan === siswaFilter))
-    .filter(s => !q || [s.namaLengkap, s.asalSekolah, s.tingkatan, s.jenisTest, s.keputusan, s.namaPetugas].some(v => normalizeText(v).includes(q)));
 
   document.getElementById('main-content').innerHTML = `
     <div class="page-header">
@@ -1825,15 +1817,11 @@ function renderSiswaList() {
       </div>
     </div>
 
-    <div class="filter-bar">
-      ${filters.map(f => `
-        <button class="filter-chip ${siswaFilter===f?'active':''}" onclick="setSiswaFilter('${f}')">${f}</button>
-      `).join('')}
-    </div>
-
-    <div class="search-box">
-      <span class="material-symbols-outlined">search</span>
-      <input type="text" id="siswaSearchInput" placeholder="Cari nama, sekolah, status, atau petugas..." value="${esc(siswaSearch)}" oninput="setSiswaSearch(this.value)">
+    <div class="card" style="background:#f6f3eb;border-style:dashed">
+      <p class="text-small text-muted" style="margin:0">
+        <span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;line-height:1">info</span>
+        Daftar hasil wawancara seluruh peserta kini ada di halaman <strong onclick="showPage('rekap')" style="cursor:pointer;color:var(--primary);text-decoration:underline">Rekap → Daftar Seluruh Peserta</strong>.
+      </p>
     </div>
 
     ${isAdmin() ? `
@@ -1907,60 +1895,7 @@ function renderSiswaList() {
       `}
     </div>
     ` : ''}
-
-    <div id="siswa-list">
-      ${filtered.length === 0 ? `
-        <div class="empty-state">
-          <div class="empty-icon"><span class="material-symbols-outlined" style="font-size:48px;vertical-align:middle;line-height:1;color:#bbcbbb">school</span></div>
-          <p>Belum ada data wawancara ${siswaFilter !== 'Semua' ? siswaFilter : 'siswa'}.</p>
-          <p class="text-small text-muted mt-2">Tambah wawancara dari halaman Beranda.</p>
-        </div>
-      ` : filtered.map(s => {
-        const hasOrtu = ortu.find(o => o.siswaId === s.id);
-        return `
-          <div class="peserta-item">
-            <div class="peserta-avatar">
-              ${s.foto ? `<img src="${s.foto}" alt="foto">` : '<span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;line-height:1;color:#6c7b6d">person</span>'}
-            </div>
-            <div class="peserta-info">
-              <div class="peserta-name">${esc(s.namaLengkap || '—')}</div>
-              <div class="peserta-meta">
-                ${getTingkatanBadge(s.tingkatan)}
-                ${getJenisTestBadge(s.jenisTest)}
-                ${hasOrtu ? `<span class="linked-badge">✓ Ortu</span>` : `<span class="unlinked-badge">! Ortu</span>`}
-              </div>
-              <div class="peserta-meta" style="margin-top:2px">
-                <span>${esc(s.asalSekolah || '—')}</span>
-                ${s.halaqah ? `<span>· Halaqah ${esc(s.halaqah)}</span>` : ''}
-              </div>
-            </div>
-            <div class="peserta-actions">
-              ${isAdmin() ? `
-                <button class="btn-icon" onclick="printSiswa('${s.id}')" title="Print/PDF"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;line-height:1">print</span></button>
-                <button class="btn-icon" onclick="editSiswa('${s.id}')" title="Edit"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;line-height:1">edit</span></button>
-                <button class="btn-icon danger" onclick="deleteSiswa('${s.id}')" title="Hapus"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;line-height:1">delete</span></button>
-              ` : ''}
-            </div>
-          </div>
-        `;
-      }).join('')}
-    </div>
   `;
-}
-
-function setSiswaFilter(f) {
-  siswaFilter = f;
-  renderSiswaList();
-}
-
-function setSiswaSearch(value) {
-  siswaSearch = value;
-  renderSiswaList();
-  const input = document.getElementById('siswaSearchInput');
-  if (input) {
-    input.focus();
-    input.setSelectionRange(input.value.length, input.value.length);
-  }
 }
 
 function deleteSiswa(id) {
@@ -2862,6 +2797,24 @@ async function saveOrtu() {
 // REKAP PAGE
 // ═══════════════════════════════════════════════════
 
+let rekapFilter = 'Semua';
+let rekapSearch = '';
+
+function setRekapFilter(f) {
+  rekapFilter = f;
+  renderRekap();
+}
+
+function setRekapSearch(value) {
+  rekapSearch = value;
+  renderRekap();
+  const input = document.getElementById('rekapSearchInput');
+  if (input) {
+    input.focus();
+    input.setSelectionRange(input.value.length, input.value.length);
+  }
+}
+
 function renderRekap() {
   updateHeaderInfo();
   const siswa = DB.siswa;
@@ -2882,6 +2835,11 @@ function renderRekap() {
 
   const sppCount = {};
   ortu.forEach(o => { if(o.spp) sppCount[o.spp] = (sppCount[o.spp]||0)+1; });
+
+  // Daftar Seluruh Peserta (hasil wawancara) — filter & pencarian
+  const rekapQ = normalizeText(rekapSearch);
+  const rekapList = (rekapFilter === 'Semua' ? siswa : siswa.filter(s => s.tingkatan === rekapFilter))
+    .filter(s => !rekapQ || [s.namaLengkap, s.asalSekolah, s.tingkatan, s.jenisTest, s.keputusan, s.namaPetugas].some(v => normalizeText(v).includes(rekapQ)));
 
   document.getElementById('main-content').innerHTML = `
     <div class="page-header">
@@ -3010,36 +2968,57 @@ function renderRekap() {
       </div>
     </div>
 
-    <!-- DAFTAR LENGKAP -->
+    <!-- DAFTAR LENGKAP / HASIL WAWANCARA -->
     <div class="card">
       <div class="card-title"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;line-height:1">list_alt</span> Daftar Seluruh Peserta</div>
+
       ${siswa.length === 0 ? '<p class="text-muted text-small">Belum ada data.</p>' : `
-        <div style="overflow-x:auto">
-          <table class="rekap-table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>Nama</th>
-                <th>Tingkatan</th>
-                <th>Halaqah</th>
-                <th>Status</th>
-                <th>Ortu</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${siswa.map((s, i) => {
-                const hasOrtu = ortu.find(o=>o.siswaId===s.id);
-                return `<tr>
-                  <td>${i+1}</td>
-                  <td><strong>${esc(s.namaLengkap)}</strong><br><span style="font-size:10px;color:var(--text-muted)">${esc(s.asalSekolah||'')}</span></td>
-                  <td>${getTingkatanBadge(s.tingkatan)}</td>
-                  <td>${s.halaqah ? `<strong>${s.halaqah}</strong>` : '<span style="color:var(--text-light)">—</span>'}</td>
-                  <td style="font-size:11px">${esc(s.keputusan||'Menunggu')}</td>
-                  <td style="text-align:center">${hasOrtu ? '✅' : '—'}</td>
-                </tr>`;
-              }).join('')}
-            </tbody>
-          </table>
+        <div class="filter-bar">
+          ${['Semua','MTs Putra','MTs Putri','MA'].map(f => `
+            <button class="filter-chip ${rekapFilter===f?'active':''}" onclick="setRekapFilter('${f}')">${f}</button>
+          `).join('')}
+        </div>
+
+        <div class="search-box">
+          <span class="material-symbols-outlined">search</span>
+          <input type="text" id="rekapSearchInput" placeholder="Cari nama, sekolah, status, atau petugas..." value="${esc(rekapSearch)}" oninput="setRekapSearch(this.value)">
+        </div>
+
+        <div id="rekap-peserta-list">
+          ${rekapList.length === 0 ? `
+            <div class="empty-state">
+              <div class="empty-icon"><span class="material-symbols-outlined" style="font-size:48px;vertical-align:middle;line-height:1;color:#bbcbbb">school</span></div>
+              <p>Tidak ada peserta ${rekapFilter !== 'Semua' ? rekapFilter : ''} yang cocok.</p>
+            </div>
+          ` : rekapList.map(s => {
+            const hasOrtu = ortu.find(o => o.siswaId === s.id);
+            return `
+              <div class="peserta-item">
+                <div class="peserta-avatar">
+                  ${s.foto ? `<img src="${s.foto}" alt="foto">` : '<span class="material-symbols-outlined" style="font-size:22px;vertical-align:middle;line-height:1;color:#6c7b6d">person</span>'}
+                </div>
+                <div class="peserta-info">
+                  <div class="peserta-name">${esc(s.namaLengkap || '—')}</div>
+                  <div class="peserta-meta">
+                    ${getTingkatanBadge(s.tingkatan)}
+                    ${getJenisTestBadge(s.jenisTest)}
+                    ${hasOrtu ? `<span class="linked-badge">✓ Ortu</span>` : `<span class="unlinked-badge">! Ortu</span>`}
+                  </div>
+                  <div class="peserta-meta" style="margin-top:2px">
+                    <span>${esc(s.asalSekolah || '—')}</span>
+                    ${s.halaqah ? `<span>· Halaqah ${esc(s.halaqah)}</span>` : ''}
+                  </div>
+                </div>
+                <div class="peserta-actions">
+                  ${isAdmin() ? `
+                    <button class="btn-icon" onclick="printSiswa('${s.id}')" title="Print/PDF"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;line-height:1">print</span></button>
+                    <button class="btn-icon" onclick="editSiswa('${s.id}')" title="Edit"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;line-height:1">edit</span></button>
+                    <button class="btn-icon danger" onclick="deleteSiswa('${s.id}')" title="Hapus"><span class="material-symbols-outlined" style="font-size:15px;vertical-align:middle;line-height:1">delete</span></button>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          }).join('')}
         </div>
       `}
     </div>
